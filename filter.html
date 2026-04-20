@@ -3,11 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Bool or No Bool - Face Tracker</title>
+    <title>Bool or No Bool - Static Filter</title>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/tracking-min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/data/face-min.js"></script>
-
     <style>
         body { 
             margin: 0; 
@@ -59,17 +56,20 @@
             border: 3px solid white;
         }
 
-        /* The tracked image that floats on your forehead */
+        /* STATIC FILTER IMAGE - Centered at the top */
         #tracked-image { 
             position: absolute;
             display: none; /* Hidden until game starts */
+            top: 10%; /* Distance from top of screen */
+            left: 50%; 
+            transform: translateX(-50%); /* Keeps it perfectly centered */
+            width: 220px; 
             border: 5px solid white; 
             border-radius: 15px; 
             background: white; 
             box-shadow: 0px 10px 20px rgba(0,0,0,0.5);
-            /* Smooth tracking movement */
-            transition: left 0.1s linear, top 0.1s linear, width 0.1s linear, transform 0.3s;
-            transform-origin: center bottom;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+            z-index: 5;
         }
 
         /* Bottom UI for the Game */
@@ -103,7 +103,7 @@
         /* --- ANIMATIONS --- */
         #feedback-text {
             position: absolute;
-            top: 40%;
+            top: 45%;
             width: 100%;
             text-align: center;
             font-size: 50px;
@@ -113,12 +113,14 @@
             text-shadow: 0px 5px 15px rgba(0,0,0,0.8);
             transition: opacity 0.2s;
             z-index: 10;
+            pointer-events: none;
         }
 
+        /* We include translateX(-50%) so it stays centered while scaling/shaking */
         .anim-correct {
             border-color: #00ff00 !important;
             box-shadow: 0 0 30px 10px rgba(0, 255, 0, 0.7) !important;
-            transform: scale(1.2);
+            transform: translateX(-50%) scale(1.1) !important; 
         }
 
         .anim-wrong {
@@ -128,11 +130,11 @@
         }
 
         @keyframes shake {
-            0% { transform: translateX(0); }
-            25% { transform: translateX(-15px) rotate(-5deg); }
-            50% { transform: translateX(15px) rotate(5deg); }
-            75% { transform: translateX(-15px) rotate(-5deg); }
-            100% { transform: translateX(0); }
+            0% { transform: translateX(-50%); }
+            25% { transform: translateX(calc(-50% - 15px)) rotate(-5deg); }
+            50% { transform: translateX(calc(-50% + 15px)) rotate(5deg); }
+            75% { transform: translateX(calc(-50% - 15px)) rotate(-5deg); }
+            100% { transform: translateX(-50%); }
         }
     </style>
 </head>
@@ -173,8 +175,8 @@
 
     <script>
         // Data State
-        let uploadedFiles = []; // Raw data URLs
-        let gameData = [];      // Array of objects: { src: "...", answer: "bool" }
+        let uploadedFiles = []; 
+        let gameData = [];      
         let currentTagIndex = 0;
         let currentGameItem = null;
         let isAnimating = false;
@@ -193,8 +195,12 @@
 
         // 1. Initialize Camera
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
-            .then((stream) => { video.srcObject = stream; })
-            .catch((err) => { alert("Please allow camera access!"); });
+            .then((stream) => { 
+                video.srcObject = stream; 
+            })
+            .catch((err) => { 
+                alert("Please allow camera access!"); 
+            });
 
         // 2. Handle File Uploads
         imageUpload.addEventListener('change', (e) => {
@@ -223,7 +229,6 @@
 
         // 4. Save Tag & Advance
         window.saveTag = function(answer) {
-            // Save the data object
             gameData.push({
                 src: uploadedFiles[currentTagIndex],
                 answer: answer
@@ -232,55 +237,19 @@
             currentTagIndex++;
 
             if (currentTagIndex < uploadedFiles.length) {
-                showTaggingImage(); // Show next image
+                showTaggingImage(); 
             } else {
-                startFilter(); // Done tagging, start the game!
+                startFilter(); 
             }
         };
 
-        // 5. Start the Game & Face Tracking
+        // 5. Start the Game (Static Layout)
         function startFilter() {
             tagScreen.style.display = 'none';
             gameUI.style.display = 'flex';
             trackedImage.style.display = 'block';
 
-            // Pick first random image
             cycleImage();
-
-            // Setup tracking.js
-            const tracker = new tracking.ObjectTracker('face');
-            tracker.setInitialScale(4);
-            tracker.setStepSize(2);
-            tracker.setEdgesDensity(0.1);
-
-            tracking.track('#camera-feed', tracker);
-
-            tracker.on('track', function(event) {
-                if (event.data.length === 0) return; // No face found this frame
-
-                // Take the first detected face
-                const face = event.data[0];
-
-                // --- MATH: Map video coordinates to screen coordinates ---
-                // Because video is "object-fit: cover", we have to calculate the crop factor
-                const scale = Math.max(window.innerWidth / video.videoWidth, window.innerHeight / video.videoHeight);
-                const offsetX = (window.innerWidth - video.videoWidth * scale) / 2;
-                const offsetY = (window.innerHeight - video.videoHeight * scale) / 2;
-
-                const mappedX = face.x * scale + offsetX;
-                const mappedY = face.y * scale + offsetY;
-                const mappedWidth = face.width * scale;
-
-                // Position the image right above the face bounding box (the forehead)
-                const imgWidth = mappedWidth * 1.2; // Make it slightly wider than the face
-                const imgX = mappedX - (imgWidth - mappedWidth) / 2; // Center horizontally
-                const imgY = mappedY - (imgWidth * 0.9); // Push it up to the forehead
-
-                // Apply styles dynamically
-                trackedImage.style.width = imgWidth + 'px';
-                trackedImage.style.left = imgX + 'px';
-                trackedImage.style.top = imgY + 'px';
-            });
         }
 
         // 6. Game Logic & Validation
@@ -291,7 +260,7 @@
         }
 
         window.makeGuess = function(guess) {
-            if (isAnimating) return; // Prevent spam clicking
+            if (isAnimating) return; 
             isAnimating = true;
 
             const isCorrect = (guess === currentGameItem.answer);
@@ -308,7 +277,6 @@
 
             feedbackText.style.opacity = 1;
 
-            // Wait 1.5 seconds, then reset and show next image
             setTimeout(() => {
                 trackedImage.classList.remove('anim-correct', 'anim-wrong');
                 feedbackText.style.opacity = 0;
