@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Bool or No Bool - Static Filter</title>
     
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
     <style>
         body { 
             margin: 0; 
@@ -41,12 +43,12 @@
             border-radius: 15px; 
             pointer-events: auto; 
             text-align: center;
-            display: none; /* Hidden by default */
+            display: none; 
             flex-direction: column;
             align-items: center;
         }
         
-        #upload-screen { display: flex; } /* Show first */
+        #upload-screen { display: flex; }
 
         #tag-preview {
             max-width: 200px;
@@ -56,13 +58,13 @@
             border: 3px solid white;
         }
 
-        /* STATIC FILTER IMAGE - Centered at the top */
+        /* STATIC FILTER IMAGE */
         #tracked-image { 
             position: absolute;
-            display: none; /* Hidden until game starts */
-            top: 10%; /* Distance from top of screen */
+            display: none; 
+            top: 10%; 
             left: 50%; 
-            transform: translateX(-50%); /* Keeps it perfectly centered */
+            transform: translateX(-50%); 
             width: 220px; 
             border: 5px solid white; 
             border-radius: 15px; 
@@ -72,7 +74,6 @@
             z-index: 5;
         }
 
-        /* Bottom UI for the Game */
         #game-ui {
             display: none;
             position: absolute;
@@ -82,7 +83,6 @@
             pointer-events: auto;
         }
 
-        /* Button Styling */
         .button-row { display: flex; gap: 20px; justify-content: center; width: 100%; }
         button { 
             padding: 15px 30px; 
@@ -100,7 +100,7 @@
         
         input[type="file"] { margin: 15px 0; }
 
-        /* --- ANIMATIONS --- */
+        /* --- ANIMATIONS & TEXT --- */
         #feedback-text {
             position: absolute;
             top: 45%;
@@ -116,7 +116,20 @@
             pointer-events: none;
         }
 
-        /* We include translateX(-50%) so it stays centered while scaling/shaking */
+        /* Added a dedicated class for the Game Over text */
+        .game-over-text {
+            color: #FFD700 !important; /* Gold */
+            font-size: 60px !important;
+            opacity: 1 !important;
+            animation: popIn 0.5s ease-out forwards;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0); }
+            80% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
         .anim-correct {
             border-color: #00ff00 !important;
             box-shadow: 0 0 30px 10px rgba(0, 255, 0, 0.7) !important;
@@ -177,6 +190,7 @@
         // Data State
         let uploadedFiles = []; 
         let gameData = [];      
+        let remainingImages = []; // Tracks which images haven't been shown yet
         let currentTagIndex = 0;
         let currentGameItem = null;
         let isAnimating = false;
@@ -243,20 +257,33 @@
             }
         };
 
-        // 5. Start the Game (Static Layout)
+        // 5. Start the Game
         function startFilter() {
             tagScreen.style.display = 'none';
             gameUI.style.display = 'flex';
             trackedImage.style.display = 'block';
 
+            // Clone the master list into our temporary pool
+            remainingImages = [...gameData]; 
+            
             cycleImage();
         }
 
         // 6. Game Logic & Validation
         function cycleImage() {
-            const randomIndex = Math.floor(Math.random() * gameData.length);
-            currentGameItem = gameData[randomIndex];
+            // Check if we are out of images!
+            if (remainingImages.length === 0) {
+                triggerGameOver();
+                return;
+            }
+
+            // Pick a random index from the REMAINING images
+            const randomIndex = Math.floor(Math.random() * remainingImages.length);
+            currentGameItem = remainingImages[randomIndex];
             trackedImage.src = currentGameItem.src;
+
+            // Remove that image from the pool so it doesn't repeat
+            remainingImages.splice(randomIndex, 1);
         }
 
         window.makeGuess = function(guess) {
@@ -284,6 +311,42 @@
                 isAnimating = false;
             }, 1500);
         };
+
+        // 7. Game Over Sequence
+        function triggerGameOver() {
+            // Hide the game elements
+            trackedImage.style.display = 'none';
+            gameUI.style.display = 'none';
+
+            // Show Game Over Text
+            feedbackText.innerText = "GAME OVER!";
+            feedbackText.className = "game-over-text";
+
+            // Blast Confetti
+            var duration = 3000;
+            var end = Date.now() + duration;
+
+            (function frame() {
+                confetti({
+                    particleCount: 5,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0 },
+                    colors: ['#00f2fe', '#ff0844', '#ffffff']
+                });
+                confetti({
+                    particleCount: 5,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1 },
+                    colors: ['#00f2fe', '#ff0844', '#ffffff']
+                });
+
+                if (Date.now() < end) {
+                    requestAnimationFrame(frame);
+                }
+            }());
+        }
     </script>
 </body>
 </html>
