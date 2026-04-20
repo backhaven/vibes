@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Bool or No Bool - Static Filter</title>
+    <title>Bool or No Bool - HD Filter</title>
     
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
@@ -22,6 +22,8 @@
             position: absolute; 
             top: 0; left: 0; 
             z-index: 1; 
+            /* FIX 1: This instantly mirrors the camera feed! */
+            transform: scaleX(-1); 
         }
         
         #ui-layer { 
@@ -34,7 +36,6 @@
             pointer-events: none; 
         }
 
-        /* Setup & Tagging Screens */
         .screen {
             background: rgba(0, 0, 0, 0.85); 
             color: white; 
@@ -58,7 +59,6 @@
             border: 3px solid white;
         }
 
-        /* STATIC FILTER IMAGE */
         #tracked-image { 
             position: absolute;
             display: none; 
@@ -100,7 +100,6 @@
         
         input[type="file"] { margin: 15px 0; }
 
-        /* --- ANIMATIONS & TEXT --- */
         #feedback-text {
             position: absolute;
             top: 45%;
@@ -116,9 +115,8 @@
             pointer-events: none;
         }
 
-        /* Added a dedicated class for the Game Over text */
         .game-over-text {
-            color: #FFD700 !important; /* Gold */
+            color: #FFD700 !important; 
             font-size: 60px !important;
             opacity: 1 !important;
             animation: popIn 0.5s ease-out forwards;
@@ -187,15 +185,13 @@
     </div>
 
     <script>
-        // Data State
         let uploadedFiles = []; 
         let gameData = [];      
-        let remainingImages = []; // Tracks which images haven't been shown yet
+        let remainingImages = []; 
         let currentTagIndex = 0;
         let currentGameItem = null;
         let isAnimating = false;
 
-        // Elements
         const video = document.getElementById('camera-feed');
         const uploadScreen = document.getElementById('upload-screen');
         const tagScreen = document.getElementById('tag-screen');
@@ -207,16 +203,24 @@
         const trackedImage = document.getElementById('tracked-image');
         const feedbackText = document.getElementById('feedback-text');
 
-        // 1. Initialize Camera
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+        // FIX 2: Demand a high-definition 1080p video feed from the phone
+        const cameraConstraints = { 
+            video: { 
+                facingMode: "user",
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            }, 
+            audio: false 
+        };
+
+        navigator.mediaDevices.getUserMedia(cameraConstraints)
             .then((stream) => { 
                 video.srcObject = stream; 
             })
             .catch((err) => { 
-                alert("Please allow camera access!"); 
+                alert("Please allow camera access! Error: " + err.message); 
             });
 
-        // 2. Handle File Uploads
         imageUpload.addEventListener('change', (e) => {
             uploadedFiles = [];
             const files = Array.from(e.target.files);
@@ -229,7 +233,6 @@
             });
         });
 
-        // 3. Move to Tagging Phase
         btnNext.addEventListener('click', () => {
             uploadScreen.style.display = 'none';
             tagScreen.style.display = 'flex';
@@ -241,7 +244,6 @@
             tagCounter.innerText = `Image ${currentTagIndex + 1} of ${uploadedFiles.length}`;
         }
 
-        // 4. Save Tag & Advance
         window.saveTag = function(answer) {
             gameData.push({
                 src: uploadedFiles[currentTagIndex],
@@ -257,32 +259,26 @@
             }
         };
 
-        // 5. Start the Game
         function startFilter() {
             tagScreen.style.display = 'none';
             gameUI.style.display = 'flex';
             trackedImage.style.display = 'block';
 
-            // Clone the master list into our temporary pool
             remainingImages = [...gameData]; 
             
             cycleImage();
         }
 
-        // 6. Game Logic & Validation
         function cycleImage() {
-            // Check if we are out of images!
             if (remainingImages.length === 0) {
                 triggerGameOver();
                 return;
             }
 
-            // Pick a random index from the REMAINING images
             const randomIndex = Math.floor(Math.random() * remainingImages.length);
             currentGameItem = remainingImages[randomIndex];
             trackedImage.src = currentGameItem.src;
 
-            // Remove that image from the pool so it doesn't repeat
             remainingImages.splice(randomIndex, 1);
         }
 
@@ -312,39 +308,20 @@
             }, 1500);
         };
 
-        // 7. Game Over Sequence
         function triggerGameOver() {
-            // Hide the game elements
             trackedImage.style.display = 'none';
             gameUI.style.display = 'none';
 
-            // Show Game Over Text
             feedbackText.innerText = "GAME OVER!";
             feedbackText.className = "game-over-text";
 
-            // Blast Confetti
             var duration = 3000;
             var end = Date.now() + duration;
 
             (function frame() {
-                confetti({
-                    particleCount: 5,
-                    angle: 60,
-                    spread: 55,
-                    origin: { x: 0 },
-                    colors: ['#00f2fe', '#ff0844', '#ffffff']
-                });
-                confetti({
-                    particleCount: 5,
-                    angle: 120,
-                    spread: 55,
-                    origin: { x: 1 },
-                    colors: ['#00f2fe', '#ff0844', '#ffffff']
-                });
-
-                if (Date.now() < end) {
-                    requestAnimationFrame(frame);
-                }
+                confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#00f2fe', '#ff0844', '#ffffff'] });
+                confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#00f2fe', '#ff0844', '#ffffff'] });
+                if (Date.now() < end) requestAnimationFrame(frame);
             }());
         }
     </script>
