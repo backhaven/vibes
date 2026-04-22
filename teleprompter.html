@@ -110,13 +110,13 @@
                 <div class="space-y-2">
                     <label class="text-xs text-gray-400">Microphone (USB/Default)</label>
                     <select id="mic-select" class="w-full bg-gray-700 p-2 rounded text-sm">
-                        <option>Click 'Detect Devices' first...</option>
+                        <option value="">Click 'Detect Devices' first...</option>
                     </select>
                 </div>
                 <div class="space-y-2">
                     <label class="text-xs text-gray-400">Camera</label>
                     <select id="camera-select" class="w-full bg-gray-700 p-2 rounded text-sm">
-                        <option>Click 'Detect Devices' first...</option>
+                        <option value="">Click 'Detect Devices' first...</option>
                     </select>
                 </div>
             </div>
@@ -240,8 +240,8 @@
                 });
 
                 if (!hasDevices) {
-                    micSelect.innerHTML = '<option>Please click Detect Devices...</option>';
-                    camSelect.innerHTML = '<option>Please click Detect Devices...</option>';
+                    micSelect.innerHTML = '<option value="">Please click Detect Devices...</option>';
+                    camSelect.innerHTML = '<option value="">Please click Detect Devices...</option>';
                 }
             } catch (err) {
                 console.error("Device access denied", err);
@@ -279,35 +279,50 @@
 
             // Handle Camera/Mic
             if (cameraToggle.checked) {
+                const validCam = camSelect.value && camSelect.value !== "";
+                const validMic = micSelect.value && micSelect.value !== "";
+
+                const constraints = {
+                    video: validCam ? { 
+                        deviceId: { exact: camSelect.value },
+                        aspectRatio: { ideal: 0.5625 } // Force exactly 9:16 portrait for Reels/TikTok
+                    } : {
+                        facingMode: "user",
+                        aspectRatio: { ideal: 0.5625 }
+                    },
+                    audio: validMic ? { 
+                        deviceId: { exact: micSelect.value },
+                        echoCancellation: false,
+                        autoGainControl: false,
+                        noiseSuppression: false,
+                        channelCount: { ideal: 2 } // Helps force Android to recognize external USB interfaces
+                    } : {
+                        echoCancellation: false,
+                        autoGainControl: false,
+                        noiseSuppression: false
+                    }
+                };
+
                 try {
-                    const constraints = {
-                        video: camSelect.value ? { 
-                            deviceId: { exact: camSelect.value },
-                            width: { ideal: 1080 },
-                            height: { ideal: 1920 },
-                            frameRate: { ideal: 30 }
-                        } : {
-                            facingMode: "user",
-                            width: { ideal: 1080 },
-                            height: { ideal: 1920 }
-                        },
-                        audio: micSelect.value ? { 
-                            deviceId: { exact: micSelect.value },
-                            echoCancellation: false,
-                            autoGainControl: false,
-                            noiseSuppression: false
-                        } : {
-                            echoCancellation: false,
-                            autoGainControl: false,
-                            noiseSuppression: false
-                        }
-                    };
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (err) {
+                    console.warn("Exact constraints failed, attempting basic fallback...", err);
+                    try {
+                        // Fallback without explicit device IDs if the USB mic or camera throws an OverconstrainedError
+                        stream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: "user", aspectRatio: { ideal: 0.5625 } },
+                            audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                        });
+                    } catch (fallbackErr) {
+                        console.error("Camera error:", fallbackErr);
+                        alert("Could not access camera/mic. Check permissions.");
+                        return; // Halt execution if we can't get media
+                    }
+                }
+
+                if (stream) {
                     cameraPreview.srcObject = stream;
                     cameraPreview.style.display = 'block';
-                } catch (err) {
-                    console.error("Camera error:", err);
-                    alert("Could not access camera/mic. Check permissions.");
                 }
             }
 
@@ -349,8 +364,10 @@
             if (!isRecording) {
                 // Start Recording
                 recordedChunks = [];
+                // Let the browser pick its native stable codec rather than forcing vp9, 
+                // which often breaks orientation metadata on mobile hardware encoders.
                 let options = { 
-                    mimeType: 'video/webm;codecs=vp9,opus',
+                    mimeType: 'video/webm',
                     videoBitsPerSecond: 10000000 // 10 Mbps for high quality
                 };
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) {
