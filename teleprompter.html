@@ -282,9 +282,6 @@
                 const validCam = camSelect.value && camSelect.value !== "";
                 const validMic = micSelect.value && micSelect.value !== "";
 
-                // Simplified constraints: Request high res but let the OS figure out the sensor layout.
-                // We will manually force 9:16 vertical using the hidden canvas during recording.
-                // We also removed the channelCount to prevent audio buzzing on mono mics.
                 const constraints = {
                     video: validCam ? { 
                         deviceId: { exact: camSelect.value },
@@ -298,22 +295,25 @@
                     audio: validMic ? { 
                         deviceId: { exact: micSelect.value },
                         echoCancellation: false, 
-                        autoGainControl: false   
-                        // Note: Removed noiseSuppression: false to let Android's hardware filter the USB mic static
+                        autoGainControl: false,
+                        noiseSuppression: false, // Turn off ALL android processing for USB mics
+                        channelCount: { ideal: 1 }, // Force Mono (Prevents stereo-interleaving buzzing bugs on Android)
+                        sampleRate: { ideal: 48000 } // Match video standard to stop OS resampling distortion
                     } : {
                         echoCancellation: false,
-                        autoGainControl: false
+                        autoGainControl: false,
+                        noiseSuppression: false
                     }
                 };
 
                 try {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
                 } catch (err) {
-                    console.warn("High-res constraints failed, attempting basic fallback...", err);
+                    console.warn("Strict constraints failed, attempting basic fallback...", err);
                     try {
                         stream = await navigator.mediaDevices.getUserMedia({
                             video: { facingMode: "user" },
-                            audio: { echoCancellation: false, autoGainControl: false }
+                            audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }
                         });
                     } catch (fallbackErr) {
                         console.error("Camera error:", fallbackErr);
@@ -366,10 +366,8 @@
             if (!isRecording) {
                 // START RECORDING
                 recordedChunks = [];
-                isRecording = true; // Set to true so the draw loop functions
+                isRecording = true; 
 
-                // THE FIX: Set up a hidden canvas to manually enforce a 9:16 vertical aspect ratio
-                // This bypasses Android Chrome's habit of recording the raw landscape sensor.
                 const canvas = document.getElementById('recording-canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.width = 1080;
@@ -382,7 +380,6 @@
                     const vh = cameraPreview.videoHeight;
                     
                     if (vw && vh) {
-                        // Calculate crop to fill the 9:16 canvas perfectly
                         const scale = Math.max(canvas.width / vw, canvas.height / vh);
                         const drawW = vw * scale;
                         const drawH = vh * scale;
@@ -390,13 +387,11 @@
                         const offsetY = (canvas.height - drawH) / 2;
                         
                         ctx.save();
-                        // Apply mirror effect to the recorded video if selected
                         if (mirrorToggle.checked) {
                             ctx.translate(canvas.width, 0);
                             ctx.scale(-1, 1);
                         }
                         
-                        // Draw with black background (just in case)
                         ctx.fillStyle = '#000';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
                         ctx.drawImage(cameraPreview, offsetX, offsetY, drawW, drawH);
@@ -405,31 +400,27 @@
                     drawAnimationFrame = requestAnimationFrame(drawFrame);
                 };
                 
-                // Start drawing
                 drawFrame();
 
-                // Extract streams
-                const canvasStream = canvas.captureStream(30); // 30 FPS vertical video
+                const canvasStream = canvas.captureStream(30); 
                 const audioTracks = stream.getAudioTracks();
                 
-                // Combine forced vertical video with the high quality USB audio
                 const combinedStream = new MediaStream([
                     ...canvasStream.getVideoTracks(),
                     ...audioTracks
                 ]);
 
-                // High quality recording options
                 let options = { 
                     mimeType: 'video/webm',
-                    videoBitsPerSecond: 10000000, // 10 Mbps for crisp video
-                    audioBitsPerSecond: 256000    // 256 kbps to prevent audio grain/buzzing
+                    videoBitsPerSecond: 10000000, 
+                    audioBitsPerSecond: 128000 // Standard high quality mono bitrate
                 };
                 
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                     options = { 
                         mimeType: 'video/mp4',
                         videoBitsPerSecond: 10000000,
-                        audioBitsPerSecond: 256000
+                        audioBitsPerSecond: 128000
                     }; 
                 }
 
@@ -471,7 +462,7 @@
                 // STOP RECORDING
                 isRecording = false;
                 mediaRecorder.stop();
-                cancelAnimationFrame(drawAnimationFrame); // Stop drawing to canvas
+                cancelAnimationFrame(drawAnimationFrame); 
                 
                 recordBtn.classList.replace('bg-red-900', 'bg-gray-800');
                 recordBtn.classList.replace('border-red-600', 'border-gray-600');
