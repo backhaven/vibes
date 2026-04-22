@@ -281,8 +281,26 @@
             if (cameraToggle.checked) {
                 try {
                     const constraints = {
-                        video: { deviceId: camSelect.value ? { exact: camSelect.value } : undefined },
-                        audio: { deviceId: micSelect.value ? { exact: micSelect.value } : undefined }
+                        video: camSelect.value ? { 
+                            deviceId: { exact: camSelect.value },
+                            width: { ideal: 1080 },
+                            height: { ideal: 1920 },
+                            frameRate: { ideal: 30 }
+                        } : {
+                            facingMode: "user",
+                            width: { ideal: 1080 },
+                            height: { ideal: 1920 }
+                        },
+                        audio: micSelect.value ? { 
+                            deviceId: { exact: micSelect.value },
+                            echoCancellation: false,
+                            autoGainControl: false,
+                            noiseSuppression: false
+                        } : {
+                            echoCancellation: false,
+                            autoGainControl: false,
+                            noiseSuppression: false
+                        }
                     };
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
                     cameraPreview.srcObject = stream;
@@ -331,15 +349,21 @@
             if (!isRecording) {
                 // Start Recording
                 recordedChunks = [];
-                let options = { mimeType: 'video/webm;codecs=vp9,opus' };
+                let options = { 
+                    mimeType: 'video/webm;codecs=vp9,opus',
+                    videoBitsPerSecond: 10000000 // 10 Mbps for high quality
+                };
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                    options = { mimeType: 'video/mp4' }; // Fallback for iOS Safari
+                    options = { 
+                        mimeType: 'video/mp4',
+                        videoBitsPerSecond: 10000000
+                    }; // Fallback for iOS Safari
                 }
 
                 try {
                     mediaRecorder = new MediaRecorder(stream, options);
                 } catch (e) {
-                    mediaRecorder = new MediaRecorder(stream); // Ultimate fallback
+                    mediaRecorder = new MediaRecorder(stream, { videoBitsPerSecond: 10000000 }); // Ultimate fallback
                 }
 
                 mediaRecorder.ondataavailable = (event) => {
