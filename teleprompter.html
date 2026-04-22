@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OpenPrompter - Free Teleprompter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --text-color: #ffffff;
+        }
+
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+            touch-action: manipulation;
+        }
+
+        #prompter-display {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.4;
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 50;
+            overflow-y: scroll;
+            scrollbar-width: none;
+        }
+
+        #prompter-display::-webkit-scrollbar {
+            display: none;
+        }
+
+        #camera-preview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 40;
+            display: none;
+            background: #000;
+        }
+
+        .mirrored {
+            transform: scaleX(-1);
+        }
+
+        .guide-line {
+            position: fixed;
+            top: 30%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(255, 0, 0, 0.5);
+            pointer-events: none;
+            z-index: 60;
+            display: none;
+        }
+
+        .active .guide-line {
+            display: block;
+        }
+
+        .control-panel {
+            transition: opacity 0.3s ease;
+        }
+        
+        .control-panel.hidden-ui {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Overlay for text readability over camera */
+        #text-overlay {
+            position: relative;
+            z-index: 55;
+            background: rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- SETUP VIEW -->
+    <div id="setup-view" class="max-w-2xl mx-auto space-y-6">
+        <header class="flex justify-between items-center border-b border-gray-700 pb-4">
+            <h1 class="text-2xl font-bold text-white">OpenPrompter</h1>
+            <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded">V2: Camera Support</span>
+        </header>
+
+        <div class="space-y-2">
+            <label class="block text-sm font-medium text-gray-400">Your Script</label>
+            <textarea id="script-input" rows="8" class="w-full bg-gray-800 text-white p-4 rounded-lg border border-gray-700 focus:ring-2 focus:ring-blue-500 focus:outline-none text-lg" placeholder="Paste your script here..."></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-gray-800 p-4 rounded-lg space-y-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-semibold text-gray-300">Hardware</h3>
+                    <button onclick="requestPermissions()" class="text-xs bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded text-white transition">Detect Devices</button>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-xs text-gray-400">Microphone (USB/Default)</label>
+                    <select id="mic-select" class="w-full bg-gray-700 p-2 rounded text-sm">
+                        <option>Click 'Detect Devices' first...</option>
+                    </select>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-xs text-gray-400">Camera</label>
+                    <select id="camera-select" class="w-full bg-gray-700 p-2 rounded text-sm">
+                        <option>Click 'Detect Devices' first...</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-lg space-y-4">
+                <h3 class="font-semibold text-gray-300">Display</h3>
+                <div class="flex items-center justify-between">
+                    <span>Text Size</span>
+                    <div class="flex items-center gap-3">
+                        <button onclick="adjustFontSize(-4)" class="w-8 h-8 bg-gray-700 rounded">-</button>
+                        <span id="font-size-label">40px</span>
+                        <button onclick="adjustFontSize(4)" class="w-8 h-8 bg-gray-700 rounded">+</button>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span>Opacity</span>
+                    <input type="range" id="opacity-slider" min="0" max="100" value="60" class="w-24">
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-gray-800 p-4 rounded-lg flex items-center justify-between">
+                <span>Enable Camera</span>
+                <input type="checkbox" id="camera-toggle" checked class="w-5 h-5">
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg flex items-center justify-between">
+                <span>Mirror Mode</span>
+                <input type="checkbox" id="mirror-toggle" class="w-5 h-5">
+            </div>
+        </div>
+
+        <button onclick="startPrompter()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl text-xl transition-all shadow-lg active:scale-95">
+            START RECORDING MODE
+        </button>
+    </div>
+
+    <!-- PROMPTER VIEW -->
+    <video id="camera-preview" autoplay playsinline muted></video>
+    
+    <div id="prompter-display">
+        <div class="guide-line"></div>
+        <div id="text-overlay">
+            <div id="script-content" class="px-8 pt-[30vh] pb-[70vh] outline-none"></div>
+        </div>
+
+        <!-- FLOATING CONTROLS -->
+        <div id="ui-controls" class="control-panel fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-gray-900/90 backdrop-blur-md p-4 rounded-full border border-gray-700 z-[100]">
+            
+            <button onclick="toggleRecord()" id="record-btn" class="w-12 h-12 flex items-center justify-center bg-gray-800 border border-gray-600 rounded-full shadow-lg transition-colors">
+                <div id="record-indicator" class="w-4 h-4 bg-red-500 rounded-full transition-all"></div>
+            </button>
+            
+            <div class="w-[1px] h-8 bg-gray-700"></div>
+
+            <button onclick="togglePlay()" id="play-btn" class="w-12 h-12 flex items-center justify-center bg-blue-600 rounded-full shadow-lg">
+                <svg id="play-icon" viewBox="0 0 24 24" class="w-6 h-6 fill-current"><path d="M8 5v14l11-7z"/></svg>
+                <svg id="pause-icon" viewBox="0 0 24 24" class="w-6 h-6 fill-current hidden"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            </button>
+            
+            <div class="flex flex-col items-center px-2">
+                <span class="text-[10px] text-gray-400 uppercase">Speed</span>
+                <input type="range" id="speed-slider" min="1" max="100" value="20" class="w-20 accent-blue-500">
+            </div>
+
+            <button onclick="stopPrompter()" class="w-10 h-10 flex items-center justify-center bg-red-600/20 text-red-500 border border-red-500/30 rounded-full">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const setupView = document.getElementById('setup-view');
+        const prompterDisplay = document.getElementById('prompter-display');
+        const scriptInput = document.getElementById('script-input');
+        const scriptContent = document.getElementById('script-content');
+        const speedSlider = document.getElementById('speed-slider');
+        const mirrorToggle = document.getElementById('mirror-toggle');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const fontSizeLabel = document.getElementById('font-size-label');
+        const opacitySlider = document.getElementById('opacity-slider');
+        const cameraToggle = document.getElementById('camera-toggle');
+        const cameraPreview = document.getElementById('camera-preview');
+        const textOverlay = document.getElementById('text-overlay');
+        const micSelect = document.getElementById('mic-select');
+        const camSelect = document.getElementById('camera-select');
+
+        let fontSize = 40;
+        let isPlaying = false;
+        let scrollPos = 0;
+        let lastTime = 0;
+        let animationFrame;
+        let stream = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+
+        // Populate device lists
+        async function getDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                
+                micSelect.innerHTML = '';
+                camSelect.innerHTML = '';
+
+                let hasDevices = false;
+
+                devices.forEach(device => {
+                    if (!device.label) return; // Skip empty labels if permissions not granted
+                    hasDevices = true;
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `${device.kind} (${device.deviceId.slice(0, 5)})`;
+                    
+                    if (device.kind === 'audioinput') {
+                        micSelect.appendChild(option);
+                    } else if (device.kind === 'videoinput') {
+                        camSelect.appendChild(option);
+                    }
+                });
+
+                if (!hasDevices) {
+                    micSelect.innerHTML = '<option>Please click Detect Devices...</option>';
+                    camSelect.innerHTML = '<option>Please click Detect Devices...</option>';
+                }
+            } catch (err) {
+                console.error("Device access denied", err);
+            }
+        }
+
+        async function requestPermissions() {
+            try {
+                // Requesting stream forces the permission prompt on mobile
+                const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                // Stop tracks immediately as we just needed the permission gate
+                tempStream.getTracks().forEach(track => track.stop());
+                await getDevices(); // Now labels will populate
+            } catch (err) {
+                alert("Permission denied. We need camera/mic access to list your devices.");
+            }
+        }
+
+        window.onload = () => {
+            const saved = localStorage.getItem('op-script');
+            if (saved) scriptInput.value = saved;
+            getDevices();
+        };
+
+        function adjustFontSize(delta) {
+            fontSize = Math.max(16, fontSize + delta);
+            fontSizeLabel.innerText = fontSize + 'px';
+        }
+
+        async function startPrompter() {
+            const script = scriptInput.value.trim();
+            if (!script) return;
+
+            localStorage.setItem('op-script', script);
+
+            // Handle Camera/Mic
+            if (cameraToggle.checked) {
+                try {
+                    const constraints = {
+                        video: { deviceId: camSelect.value ? { exact: camSelect.value } : undefined },
+                        audio: { deviceId: micSelect.value ? { exact: micSelect.value } : undefined }
+                    };
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    cameraPreview.srcObject = stream;
+                    cameraPreview.style.display = 'block';
+                } catch (err) {
+                    console.error("Camera error:", err);
+                    alert("Could not access camera/mic. Check permissions.");
+                }
+            }
+
+            // UI Adjustments
+            prompterDisplay.style.backgroundColor = cameraToggle.checked ? 'transparent' : 'var(--bg-color)';
+            scriptContent.innerText = script;
+            scriptContent.style.fontSize = fontSize + 'px';
+            textOverlay.style.backgroundColor = `rgba(0,0,0,${opacitySlider.value / 100})`;
+            
+            if (mirrorToggle.checked) {
+                scriptContent.classList.add('mirrored');
+                cameraPreview.classList.add('mirrored');
+            } else {
+                scriptContent.classList.remove('mirrored');
+                cameraPreview.classList.remove('mirrored');
+            }
+
+            setupView.style.display = 'none';
+            prompterDisplay.style.display = 'block';
+            prompterDisplay.classList.add('active');
+            
+            scrollPos = 0;
+            prompterDisplay.scrollTop = 0;
+            isPlaying = false;
+            isRecording = false; // Reset recording state
+            updatePlayUI();
+            resetUITimer();
+        }
+
+        function toggleRecord() {
+            if (!stream) {
+                alert("Camera/Mic stream not active. Cannot record.");
+                return;
+            }
+
+            const recordBtn = document.getElementById('record-btn');
+            const recordIndicator = document.getElementById('record-indicator');
+
+            if (!isRecording) {
+                // Start Recording
+                recordedChunks = [];
+                let options = { mimeType: 'video/webm;codecs=vp9,opus' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options = { mimeType: 'video/mp4' }; // Fallback for iOS Safari
+                }
+
+                try {
+                    mediaRecorder = new MediaRecorder(stream, options);
+                } catch (e) {
+                    mediaRecorder = new MediaRecorder(stream); // Ultimate fallback
+                }
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data && event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    if (recordedChunks.length === 0) return;
+                    const blob = new Blob(recordedChunks, { type: recordedChunks[0]?.type || 'video/mp4' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    document.body.appendChild(a);
+                    a.style = 'display: none';
+                    a.href = url;
+                    const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
+                    a.download = `Prompter_Recording_${new Date().getTime()}.${extension}`;
+                    a.click();
+                    setTimeout(() => {
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    }, 1000); // Increased timeout so mobile browsers have time to catch the download
+                };
+
+                mediaRecorder.start(); // Record in one continuous block for mobile stability
+                isRecording = true;
+                
+                // Update UI to recording state
+                recordBtn.classList.replace('bg-gray-800', 'bg-red-900');
+                recordBtn.classList.replace('border-gray-600', 'border-red-600');
+                recordIndicator.classList.add('animate-pulse');
+            } else {
+                // Stop Recording
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                // Revert UI
+                recordBtn.classList.replace('bg-red-900', 'bg-gray-800');
+                recordBtn.classList.replace('border-red-600', 'border-gray-600');
+                recordIndicator.classList.remove('animate-pulse');
+            }
+        }
+
+        function stopPrompter() {
+            isPlaying = false;
+            cancelAnimationFrame(animationFrame);
+            
+            if (isRecording) {
+                toggleRecord(); // Safely stop and trigger download before exiting
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            cameraPreview.style.display = 'none';
+            prompterDisplay.style.display = 'none';
+            setupView.style.display = 'block';
+            prompterDisplay.classList.remove('active');
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            updatePlayUI();
+            if (isPlaying) {
+                lastTime = performance.now();
+                requestAnimationFrame(scrollLoop);
+                resetUITimer();
+            } else {
+                const controls = document.getElementById('ui-controls');
+                if (controls) controls.classList.remove('hidden-ui');
+                if (typeof uiTimer !== 'undefined') clearTimeout(uiTimer);
+            }
+        }
+
+        function updatePlayUI() {
+            if (isPlaying) {
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+            } else {
+                playIcon.classList.remove('hidden');
+                pauseIcon.classList.add('hidden');
+            }
+        }
+
+        function scrollLoop(time) {
+            if (!isPlaying) return;
+            const dt = time - lastTime;
+            lastTime = time;
+            const speed = speedSlider.value / 10;
+            scrollPos += speed * (dt / 16.67);
+            prompterDisplay.scrollTop = scrollPos;
+
+            if (prompterDisplay.scrollTop >= (prompterDisplay.scrollHeight - prompterDisplay.clientHeight)) {
+                isPlaying = false;
+                updatePlayUI();
+            } else {
+                animationFrame = requestAnimationFrame(scrollLoop);
+            }
+        }
+
+        prompterDisplay.addEventListener('click', (e) => {
+            if (e.target.closest('#ui-controls')) return;
+            togglePlay();
+        });
+
+        let uiTimer;
+        function resetUITimer() {
+            const controls = document.getElementById('ui-controls');
+            if (controls) controls.classList.remove('hidden-ui');
+            clearTimeout(uiTimer);
+            uiTimer = setTimeout(() => {
+                if (isPlaying) {
+                    controls.classList.add('hidden-ui');
+                }
+            }, 3000);
+        }
+
+        window.addEventListener('mousemove', resetUITimer);
+        window.addEventListener('touchstart', resetUITimer);
+        window.addEventListener('click', resetUITimer);
+    </script>
+</body>
+</html>
