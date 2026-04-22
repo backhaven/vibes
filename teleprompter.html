@@ -93,7 +93,7 @@
     <div id="setup-view" class="max-w-2xl mx-auto space-y-6">
         <header class="flex justify-between items-center border-b border-gray-700 pb-4">
             <h1 class="text-2xl font-bold text-white">OpenPrompter</h1>
-            <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded">V2: Camera Support</span>
+            <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded">V3: True Vertical Canvas</span>
         </header>
 
         <div class="space-y-2">
@@ -156,6 +156,7 @@
 
     <!-- PROMPTER VIEW -->
     <video id="camera-preview" autoplay playsinline muted></video>
+    <canvas id="recording-canvas" class="hidden"></canvas>
     
     <div id="prompter-display">
         <div class="guide-line"></div>
@@ -214,6 +215,7 @@
         let mediaRecorder = null;
         let recordedChunks = [];
         let isRecording = false;
+        let drawAnimationFrame;
 
         // Populate device lists
         async function getDevices() {
@@ -250,11 +252,9 @@
 
         async function requestPermissions() {
             try {
-                // Requesting stream forces the permission prompt on mobile
                 const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-                // Stop tracks immediately as we just needed the permission gate
                 tempStream.getTracks().forEach(track => track.stop());
-                await getDevices(); // Now labels will populate
+                await getDevices(); 
             } catch (err) {
                 alert("Permission denied. We need camera/mic access to list your devices.");
             }
@@ -282,41 +282,43 @@
                 const validCam = camSelect.value && camSelect.value !== "";
                 const validMic = micSelect.value && micSelect.value !== "";
 
+                // Simplified constraints: Request high res but let the OS figure out the sensor layout.
+                // We will manually force 9:16 vertical using the hidden canvas during recording.
+                // We also removed the channelCount to prevent audio buzzing on mono mics.
                 const constraints = {
                     video: validCam ? { 
                         deviceId: { exact: camSelect.value },
-                        aspectRatio: { ideal: 0.5625 } // Force exactly 9:16 portrait for Reels/TikTok
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
                     } : {
                         facingMode: "user",
-                        aspectRatio: { ideal: 0.5625 }
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
                     },
                     audio: validMic ? { 
                         deviceId: { exact: micSelect.value },
-                        echoCancellation: false,
-                        autoGainControl: false,
-                        noiseSuppression: false,
-                        channelCount: { ideal: 2 } // Helps force Android to recognize external USB interfaces
+                        echoCancellation: false, 
+                        autoGainControl: false   
+                        // Note: Removed noiseSuppression: false to let Android's hardware filter the USB mic static
                     } : {
                         echoCancellation: false,
-                        autoGainControl: false,
-                        noiseSuppression: false
+                        autoGainControl: false
                     }
                 };
 
                 try {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
                 } catch (err) {
-                    console.warn("Exact constraints failed, attempting basic fallback...", err);
+                    console.warn("High-res constraints failed, attempting basic fallback...", err);
                     try {
-                        // Fallback without explicit device IDs if the USB mic or camera throws an OverconstrainedError
                         stream = await navigator.mediaDevices.getUserMedia({
-                            video: { facingMode: "user", aspectRatio: { ideal: 0.5625 } },
-                            audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }
+                            video: { facingMode: "user" },
+                            audio: { echoCancellation: false, autoGainControl: false }
                         });
                     } catch (fallbackErr) {
                         console.error("Camera error:", fallbackErr);
                         alert("Could not access camera/mic. Check permissions.");
-                        return; // Halt execution if we can't get media
+                        return; 
                     }
                 }
 
@@ -347,7 +349,7 @@
             scrollPos = 0;
             prompterDisplay.scrollTop = 0;
             isPlaying = false;
-            isRecording = false; // Reset recording state
+            isRecording = false; 
             updatePlayUI();
             resetUITimer();
         }
@@ -362,25 +364,79 @@
             const recordIndicator = document.getElementById('record-indicator');
 
             if (!isRecording) {
-                // Start Recording
+                // START RECORDING
                 recordedChunks = [];
-                // Let the browser pick its native stable codec rather than forcing vp9, 
-                // which often breaks orientation metadata on mobile hardware encoders.
+                isRecording = true; // Set to true so the draw loop functions
+
+                // THE FIX: Set up a hidden canvas to manually enforce a 9:16 vertical aspect ratio
+                // This bypasses Android Chrome's habit of recording the raw landscape sensor.
+                const canvas = document.getElementById('recording-canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 1080;
+                canvas.height = 1920;
+
+                const drawFrame = () => {
+                    if (!isRecording) return;
+                    
+                    const vw = cameraPreview.videoWidth;
+                    const vh = cameraPreview.videoHeight;
+                    
+                    if (vw && vh) {
+                        // Calculate crop to fill the 9:16 canvas perfectly
+                        const scale = Math.max(canvas.width / vw, canvas.height / vh);
+                        const drawW = vw * scale;
+                        const drawH = vh * scale;
+                        const offsetX = (canvas.width - drawW) / 2;
+                        const offsetY = (canvas.height - drawH) / 2;
+                        
+                        ctx.save();
+                        // Apply mirror effect to the recorded video if selected
+                        if (mirrorToggle.checked) {
+                            ctx.translate(canvas.width, 0);
+                            ctx.scale(-1, 1);
+                        }
+                        
+                        // Draw with black background (just in case)
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(cameraPreview, offsetX, offsetY, drawW, drawH);
+                        ctx.restore();
+                    }
+                    drawAnimationFrame = requestAnimationFrame(drawFrame);
+                };
+                
+                // Start drawing
+                drawFrame();
+
+                // Extract streams
+                const canvasStream = canvas.captureStream(30); // 30 FPS vertical video
+                const audioTracks = stream.getAudioTracks();
+                
+                // Combine forced vertical video with the high quality USB audio
+                const combinedStream = new MediaStream([
+                    ...canvasStream.getVideoTracks(),
+                    ...audioTracks
+                ]);
+
+                // High quality recording options
                 let options = { 
                     mimeType: 'video/webm',
-                    videoBitsPerSecond: 10000000 // 10 Mbps for high quality
+                    videoBitsPerSecond: 10000000, // 10 Mbps for crisp video
+                    audioBitsPerSecond: 256000    // 256 kbps to prevent audio grain/buzzing
                 };
+                
                 if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                     options = { 
                         mimeType: 'video/mp4',
-                        videoBitsPerSecond: 10000000
-                    }; // Fallback for iOS Safari
+                        videoBitsPerSecond: 10000000,
+                        audioBitsPerSecond: 256000
+                    }; 
                 }
 
                 try {
-                    mediaRecorder = new MediaRecorder(stream, options);
+                    mediaRecorder = new MediaRecorder(combinedStream, options);
                 } catch (e) {
-                    mediaRecorder = new MediaRecorder(stream, { videoBitsPerSecond: 10000000 }); // Ultimate fallback
+                    mediaRecorder = new MediaRecorder(combinedStream); 
                 }
 
                 mediaRecorder.ondataavailable = (event) => {
@@ -403,22 +459,20 @@
                     setTimeout(() => {
                         window.URL.revokeObjectURL(url);
                         document.body.removeChild(a);
-                    }, 1000); // Increased timeout so mobile browsers have time to catch the download
+                    }, 1000); 
                 };
 
-                mediaRecorder.start(); // Record in one continuous block for mobile stability
-                isRecording = true;
+                mediaRecorder.start(); 
                 
-                // Update UI to recording state
                 recordBtn.classList.replace('bg-gray-800', 'bg-red-900');
                 recordBtn.classList.replace('border-gray-600', 'border-red-600');
                 recordIndicator.classList.add('animate-pulse');
             } else {
-                // Stop Recording
-                mediaRecorder.stop();
+                // STOP RECORDING
                 isRecording = false;
+                mediaRecorder.stop();
+                cancelAnimationFrame(drawAnimationFrame); // Stop drawing to canvas
                 
-                // Revert UI
                 recordBtn.classList.replace('bg-red-900', 'bg-gray-800');
                 recordBtn.classList.replace('border-red-600', 'border-gray-600');
                 recordIndicator.classList.remove('animate-pulse');
@@ -430,7 +484,7 @@
             cancelAnimationFrame(animationFrame);
             
             if (isRecording) {
-                toggleRecord(); // Safely stop and trigger download before exiting
+                toggleRecord(); 
             }
             
             if (stream) {
